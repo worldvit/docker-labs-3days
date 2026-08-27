@@ -46,9 +46,38 @@ docker-labs-3days/
 ├── bin/
 │   ├── submit.sh              결과 JSON S3 업로드
 │   └── stats-collect.sh       docker stats 주기 수집 → CSV
-└── assets/
-    ├── flask-app/             Day 2·3 실습용 Flask 앱 (app.py, Dockerfile, requirements.txt)
-    └── lab03/                 Day 3 실습용 nginx.conf, init.sql, .env.example
+├── assets/
+│   ├── flask-app/             Day 2·3 실습용 Flask 앱 (app.py, Dockerfile, requirements.txt)
+│   └── lab03/                 Day 3 실습용 nginx.conf, init.sql, compose.reference.yaml
+└── setup/                     강사 전용 — 학생은 볼 필요 없음
+    ├── user-data.sh           EC2 부트스트랩 (Docker 설치 자동화)
+    ├── iam-trust-policy.json  EC2 신뢰 정책
+    ├── iam-policy-shared.json 반 공용 권한 정책
+    ├── iam-policy-per-student.json  학번별 프리픽스 격리 정책
+    ├── create-student-roles.sh      학번별 IAM 역할 일괄 생성
+    ├── collect-results.sh           S3 제출물 → 성적표 CSV
+    └── students.csv                 명단 예시 (학번,이름)
+```
+
+## 강사 준비 (개강 전)
+
+```bash
+# 1) 제출 버킷 생성 + 버전 관리
+aws s3 mb s3://docker-edu-submit --region ap-northeast-2
+aws s3api put-bucket-versioning --bucket docker-edu-submit \
+  --versioning-configuration Status=Enabled
+
+# 2) 학번별 IAM 역할 생성 (setup/students.csv 를 먼저 채우십시오)
+bash setup/create-student-roles.sh setup/students.csv
+
+# 3) EC2 생성 시 사용자 데이터에 setup/user-data.sh 내용을 붙여넣고
+#    IAM 인스턴스 프로파일로 docker-lab-role-<학번> 을 지정
+
+# 4) 수업 종료 후 성적 집계
+bash setup/collect-results.sh setup/students.csv
+
+# 5) 과정 종료 후 역할 정리
+bash setup/create-student-roles.sh setup/students.csv --delete
 ```
 
 ## 채점 항목 요약
