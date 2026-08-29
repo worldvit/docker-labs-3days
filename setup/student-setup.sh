@@ -29,11 +29,12 @@ echo ""
 echo "=== Docker 3일 과정 · 계정 셋업 ==="
 
 # ---- 1. 나는 누구인가 --------------------------------------------------------
-CALLER="$(aws sts get-caller-identity --output json 2>/dev/null)" \
+ACCT="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" \
   || die "AWS 자격 증명을 찾지 못했습니다. CloudShell 에서 실행하고 있는지 확인하십시오."
-
-ACCT="$(echo "$CALLER" | grep -o '\"Account\": *\"[0-9]*\"' | grep -o '[0-9]\{12\}')"
-ARN="$(echo "$CALLER"  | sed -n 's/.*\"Arn\": *\"\([^\"]*\)\".*/\1/p')"
+ARN="$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)"
+if [ -z "$ACCT" ] || [ "$ACCT" = "None" ]; then
+  die "계정 ID를 확인하지 못했습니다."
+fi
 
 echo ""
 echo "  계정 ID : $ACCT"
@@ -107,9 +108,14 @@ IID="$(aws ec2 describe-instances --region "$REGION" \
   --query 'Reservations[0].Instances[0].InstanceId' --output text 2>/dev/null)"
 
 if [ "$IID" = "None" ] || [ -z "$IID" ]; then
-  warn "이름이 docker-lab 으로 시작하는 인스턴스를 못 찾았습니다."
-  echo "         인스턴스를 만든 뒤 이 스크립트를 다시 실행하거나,"
-  echo "         콘솔에서 [작업 → 보안 → IAM 역할 수정]으로 ${ROLE} 을 직접 연결하십시오."
+  echo ""
+  echo -e "  ${C_G}[정상]${C_N} 실습 인스턴스가 아직 없습니다."
+  echo "         EC2 를 아직 만들지 않았다면 이것이 정상입니다."
+  echo "         다음 단계에서 인스턴스를 만들 때 [고급 세부 정보] →"
+  echo "         [IAM 인스턴스 프로파일] 에 ${ROLE} 을 지정하십시오."
+  echo ""
+  echo "         이미 만든 인스턴스에 붙이려면 이름을 docker-lab 으로 시작하게"
+  echo "         고친 뒤 이 스크립트를 다시 실행하십시오."
 else
   ASSOC="$(aws ec2 describe-iam-instance-profile-associations --region "$REGION" \
     --filters "Name=instance-id,Values=${IID}" \
@@ -118,12 +124,14 @@ else
   if [ "$ASSOC" != "None" ] && [ -n "$ASSOC" ]; then
     aws ec2 replace-iam-instance-profile-association --region "$REGION" \
       --association-id "$ASSOC" --iam-instance-profile Name="$ROLE" >/dev/null \
-      && ok "인스턴스 ${IID} 의 역할을 ${ROLE} 로 교체" \
+      && { ok "인스턴스 ${IID} 의 역할을 ${ROLE} 로 교체"
+           warn "생성 후에 바꿨으므로 SSM 접속 전에 인스턴스를 재부팅하십시오."; } \
       || warn "역할 교체 실패 — 콘솔에서 직접 바꾸십시오"
   else
     aws ec2 associate-iam-instance-profile --region "$REGION" \
       --instance-id "$IID" --iam-instance-profile Name="$ROLE" >/dev/null \
-      && ok "인스턴스 ${IID} 에 ${ROLE} 연결" \
+      && { ok "인스턴스 ${IID} 에 ${ROLE} 연결"
+           warn "생성 후에 붙였으므로 SSM 접속 전에 인스턴스를 재부팅하십시오."; } \
       || warn "역할 연결 실패 — 콘솔에서 직접 연결하십시오"
   fi
 fi
@@ -170,9 +178,17 @@ rm -f /tmp/trust.json /tmp/lab.json /tmp/budget.json /tmp/notif.json
 echo ""
 echo "=== 셋업 완료 ==="
 echo ""
-echo "  EC2 에 SSM 으로 접속한 뒤 아래를 실행하십시오."
+echo "  이제 EC2 인스턴스를 만드십시오."
 echo ""
-echo "    sudo su - ubuntu"
-echo "    cd ~/docker-labs-3days && git pull"
-echo "    docker version"
+echo "  [고급 세부 정보] -> [IAM 인스턴스 프로파일] 에서"
+echo "  반드시 아래를 선택하십시오. 생성 후에 붙이면 SSM 접속이"
+echo "  바로 되지 않아 재부팅이 필요합니다."
+echo ""
+echo "      ${ROLE}"
+echo ""
+echo "  인스턴스 생성 후 SSM 으로 접속해 아래를 실행하십시오."
+echo ""
+echo "      sudo su - ubuntu"
+echo "      free -h | head -2"
+echo "      nproc"
 echo ""
