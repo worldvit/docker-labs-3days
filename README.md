@@ -36,6 +36,9 @@ EC2 는 **이름을 `docker-lab` 으로 시작**하게 만들어야 스크립트
 
 ### 2. EC2 생성
 
+인스턴스 유형은 **`m7i-flex.large`** (2 vCPU / 8 GiB), 루트 볼륨 30 GiB gp3 로 만듭니다.
+기본 선택인 `t3.micro` 는 메모리가 1 GiB 라 Day 3 의 Nginx + Flask 3개 + PostgreSQL 동시 기동을 견디지 못합니다.
+
 사용자 데이터에 `setup/user-data.sh` 내용을 붙여넣으면 Docker CE 28 과 AWS CLI 가 자동 설치됩니다.
 
 ### 3. EC2 안에서
@@ -90,7 +93,7 @@ web/app/db 3계층 기동 · app 3 replica · 라운드로빈 분산 · db·app 
 
 ## 환경 전제
 
-- AWS 서울 리전(`ap-northeast-2`), EC2 `t3.medium`, Ubuntu 24.04 LTS
+- AWS 서울 리전(`ap-northeast-2`), EC2 `m7i-flex.large` (2 vCPU / 8 GiB), Ubuntu 24.04 LTS, 루트 30 GiB gp3
 - 접속은 SSM Session Manager (SSH 키·22번 포트 미사용)
 - Docker CE 28.x (containerd 이미지 스토어)
 - IAM 역할에 `AmazonSSMManagedInstanceCore` 와 ECR `docker-labs` 권한
