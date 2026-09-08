@@ -1,0 +1,11 @@
+# 실제 환경 변수 파일 — .env.example 만 저장소에 둡니다
+.env
+
+# 학생 채점 결과
+result/
+
+# 편집기 · OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
