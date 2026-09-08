@@ -2,11 +2,15 @@
 # =============================================================================
 # 학생용 계정 셋업 — 본인 AWS 계정에서 딱 한 번만 실행합니다.
 #
+# 리포지토리: https://github.com/worldvit/docker-labs-3days
+#
 # 실행 위치: AWS CloudShell  (콘솔 우측 상단 터미널 아이콘)
 #            EC2 안이 아닙니다. EC2 는 아직 권한이 없기 때문입니다.
 #
 # 사용법:
-#   bash student-setup.sh
+#   git clone https://github.com/worldvit/docker-labs-3days.git
+#   cd docker-labs-3days
+#   bash setup/student-setup.sh
 #
 # 하는 일:
 #   1) 내 계정 확인
@@ -14,10 +18,12 @@
 #   3) 인스턴스 프로파일 생성
 #   4) 이름이 docker-lab 으로 시작하는 인스턴스에 자동 연결
 #   5) 비용 예산 알림 설정
+#
+# 여러 번 다시 실행해도 안전합니다.
 # =============================================================================
 set -uo pipefail
 
-REGION="${AWS_REGION:-ap-northeast-2}"
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-northeast-2}}"
 ROLE="docker-lab-role"
 
 C_G='\033[0;32m'; C_R='\033[0;31m'; C_Y='\033[0;33m'; C_N='\033[0m'
@@ -25,10 +31,16 @@ ok()   { echo -e "  ${C_G}[OK]${C_N}   $*"; }
 warn() { echo -e "  ${C_Y}[주의]${C_N} $*"; }
 die()  { echo -e "  ${C_R}[오류]${C_N} $*"; exit 1; }
 
+# 중간에 멈춰도 임시 파일이 남지 않도록 정리
+trap 'rm -f /tmp/trust.json /tmp/lab.json /tmp/budget.json /tmp/notif.json' EXIT
+
 echo ""
 echo "=== Docker 3일 과정 · 계정 셋업 ==="
 
 # ---- 1. 나는 누구인가 --------------------------------------------------------
+command -v aws >/dev/null 2>&1 \
+  || die "aws 명령을 찾지 못했습니다. AWS CloudShell 에서 실행하십시오."
+
 ACCT="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" \
   || die "AWS 자격 증명을 찾지 못했습니다. CloudShell 에서 실행하고 있는지 확인하십시오."
 ARN="$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)"
@@ -43,7 +55,12 @@ echo "  리전    : $REGION"
 echo ""
 
 case "$ARN" in
-  *":root") warn "루트 사용자로 실행 중입니다. 평소에는 kdt25 로 로그인하십시오." ;;
+  *":assumed-role/${ROLE}/"*)
+    die "여기는 실습용 EC2 입니다. 이 스크립트는 AWS CloudShell 에서 실행해야 합니다."
+    ;;
+  *":root")
+    warn "루트 사용자로 실행 중입니다. 평소에는 kdt25 로 로그인하십시오."
+    ;;
 esac
 
 # ---- 2. IAM 역할 -------------------------------------------------------------
@@ -117,26 +134,36 @@ if [ "$IID" = "None" ] || [ -z "$IID" ]; then
   echo "         이미 만든 인스턴스에 붙이려면 이름을 docker-lab 으로 시작하게"
   echo "         고친 뒤 이 스크립트를 다시 실행하십시오."
 else
+  # state=associated 필터가 반드시 있어야 합니다.
+  # 이 필터가 없으면 과거에 끊어진(disassociated) 연결 기록까지 함께 조회되고,
+  # 그 죽은 association-id 로 교체를 시도하면 IncorrectState 오류가 납니다.
   ASSOC="$(aws ec2 describe-iam-instance-profile-associations --region "$REGION" \
-    --filters "Name=instance-id,Values=${IID}" \
+    --filters "Name=instance-id,Values=${IID}" "Name=state,Values=associated" \
     --query 'IamInstanceProfileAssociations[0].AssociationId' --output text 2>/dev/null)"
 
-  if [ "$ASSOC" != "None" ] && [ -n "$ASSOC" ]; then
+  CURPROF="$(aws ec2 describe-iam-instance-profile-associations --region "$REGION" \
+    --filters "Name=instance-id,Values=${IID}" "Name=state,Values=associated" \
+    --query 'IamInstanceProfileAssociations[0].IamInstanceProfile.Arn' --output text 2>/dev/null)"
+
+  if [ "${CURPROF##*/}" = "$ROLE" ]; then
+    ok "인스턴스 ${IID} 에 이미 ${ROLE} 이 연결되어 있습니다"
+  elif [ "$ASSOC" != "None" ] && [ -n "$ASSOC" ]; then
     aws ec2 replace-iam-instance-profile-association --region "$REGION" \
       --association-id "$ASSOC" --iam-instance-profile Name="$ROLE" >/dev/null \
       && { ok "인스턴스 ${IID} 의 역할을 ${ROLE} 로 교체"
            warn "생성 후에 바꿨으므로 SSM 접속 전에 인스턴스를 재부팅하십시오."; } \
-      || warn "역할 교체 실패 — 콘솔에서 직접 바꾸십시오"
+      || warn "역할 교체 실패 — 콘솔 [작업 → 보안 → IAM 역할 수정] 에서 직접 바꾸십시오"
   else
     aws ec2 associate-iam-instance-profile --region "$REGION" \
       --instance-id "$IID" --iam-instance-profile Name="$ROLE" >/dev/null \
       && { ok "인스턴스 ${IID} 에 ${ROLE} 연결"
            warn "생성 후에 붙였으므로 SSM 접속 전에 인스턴스를 재부팅하십시오."; } \
-      || warn "역할 연결 실패 — 콘솔에서 직접 연결하십시오"
+      || warn "역할 연결 실패 — 콘솔 [작업 → 보안 → IAM 역할 수정] 에서 직접 연결하십시오"
   fi
 fi
 
 # ---- 5. 비용 예산 알림 --------------------------------------------------------
+echo ""
 read -r -p "  비용 알림을 받을 이메일 (건너뛰려면 Enter): " EMAIL
 if [ -n "$EMAIL" ]; then
   cat > /tmp/budget.json <<EOF
@@ -171,8 +198,6 @@ EOF
 else
   warn "예산 알림을 건너뛰었습니다. 인스턴스를 끄는 것을 잊지 마십시오."
 fi
-
-rm -f /tmp/trust.json /tmp/lab.json /tmp/budget.json /tmp/notif.json
 
 # ---- 마무리 -------------------------------------------------------------------
 echo ""
